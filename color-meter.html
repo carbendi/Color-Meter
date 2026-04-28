@@ -1,0 +1,757 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Color Meter">
+<title>Color Meter</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+  :root {
+    --bg: #0a0a0a;
+    --panel: rgba(18,18,18,0.92);
+    --border: rgba(255,255,255,0.08);
+    --accent: #e8b84b;
+    --accent2: #4bc8e8;
+    --text: #f0f0f0;
+    --muted: rgba(255,255,255,0.45);
+    --red: #e84b4b;
+    --font: 'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font);
+    height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  /* STATUS BAR SAFE AREA */
+  .safe-top { padding-top: env(safe-area-inset-top, 20px); }
+  .safe-bottom { padding-bottom: env(safe-area-inset-bottom, 16px); }
+
+  /* HEADER */
+  .header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 16px 10px;
+    background: var(--panel);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-bottom: 0.5px solid var(--border);
+    flex-shrink: 0;
+    z-index: 10;
+  }
+  .header-title {
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  .header-sub {
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 0.05em;
+  }
+  .rec-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--red);
+    animation: pulse 1.4s infinite;
+    display: none;
+  }
+  .rec-dot.active { display: block; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+  /* VIEWFINDER */
+  .viewfinder-wrap {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+    background: #000;
+    min-height: 0;
+  }
+
+  video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+
+  canvas#hidden-canvas { display: none; }
+
+  /* ZOOM RETICLE */
+  .reticle {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    z-index: 5;
+  }
+  .reticle-ring {
+    width: 64px; height: 64px;
+    border-radius: 50%;
+    border: 1.5px solid rgba(255,255,255,0.8);
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .reticle-ring::before, .reticle-ring::after {
+    content: '';
+    position: absolute;
+    background: rgba(255,255,255,0.8);
+  }
+  .reticle-ring::before { width: 1px; height: 16px; }
+  .reticle-ring::after { width: 16px; height: 1px; }
+  .reticle-corner {
+    position: absolute;
+    width: 10px; height: 10px;
+    border-color: var(--accent);
+    border-style: solid;
+  }
+  .rc-tl { top:-5px; left:-5px; border-width: 2px 0 0 2px; }
+  .rc-tr { top:-5px; right:-5px; border-width: 2px 2px 0 0; }
+  .rc-bl { bottom:-5px; left:-5px; border-width: 0 0 2px 2px; }
+  .rc-br { bottom:-5px; right:-5px; border-width: 0 2px 2px 0; }
+
+  /* OVERLAY COLOR SWATCH */
+  .color-swatch {
+    position: absolute;
+    top: 16px; right: 16px;
+    width: 44px; height: 44px;
+    border-radius: 50%;
+    border: 2px solid rgba(255,255,255,0.6);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.6);
+    z-index: 6;
+    transition: background 0.1s;
+  }
+
+  /* ZOOM OVERLAY */
+  .zoom-overlay {
+    position: absolute;
+    bottom: 10px; left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0,0,0,0.5);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 0.5px solid var(--border);
+    border-radius: 20px;
+    padding: 4px 14px;
+    font-size: 12px;
+    color: var(--accent);
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    z-index: 6;
+  }
+
+  /* PINCH ZOOM HINT */
+  .zoom-hint {
+    position: absolute;
+    top: 16px; left: 16px;
+    font-size: 10px;
+    color: var(--muted);
+    letter-spacing: 0.04em;
+    background: rgba(0,0,0,0.4);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    border-radius: 8px;
+    padding: 4px 8px;
+    z-index: 6;
+  }
+
+  /* MAIN METER PANEL */
+  .meter-panel {
+    background: var(--panel);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-top: 0.5px solid var(--border);
+    flex-shrink: 0;
+    z-index: 10;
+  }
+
+  /* KELVIN + TINT ROW */
+  .primary-readings {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    border-bottom: 0.5px solid var(--border);
+  }
+  .reading-block {
+    padding: 12px 16px;
+    position: relative;
+  }
+  .reading-block:first-child {
+    border-right: 0.5px solid var(--border);
+  }
+  .reading-label {
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 2px;
+    font-weight: 500;
+  }
+  .reading-value {
+    font-size: 32px;
+    font-weight: 300;
+    letter-spacing: -0.02em;
+    line-height: 1;
+  }
+  .reading-unit {
+    font-size: 12px;
+    font-weight: 400;
+    color: var(--muted);
+    margin-left: 2px;
+  }
+  .kelvin-value { color: var(--accent); }
+  .tint-value { color: var(--accent2); }
+
+  .tint-bar {
+    height: 3px;
+    background: linear-gradient(to right, #4bc842, #e84be8);
+    border-radius: 2px;
+    margin-top: 6px;
+    position: relative;
+    overflow: hidden;
+  }
+  .tint-indicator {
+    position: absolute;
+    top: -2px;
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: white;
+    box-shadow: 0 0 4px rgba(0,0,0,0.6);
+    transform: translateX(-50%);
+    transition: left 0.15s;
+  }
+
+  /* EXPOSURE CONTROLS */
+  .exposure-section {
+    padding: 10px 0 4px;
+  }
+  .exposure-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    border-bottom: 0.5px solid var(--border);
+  }
+  .exp-block {
+    padding: 8px 0 8px 16px;
+    position: relative;
+  }
+  .exp-block + .exp-block {
+    border-left: 0.5px solid var(--border);
+  }
+  .exp-label {
+    font-size: 9px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 500;
+    margin-bottom: 1px;
+  }
+  .exp-value {
+    font-size: 18px;
+    font-weight: 300;
+    letter-spacing: -0.01em;
+  }
+  .exp-unit {
+    font-size: 10px;
+    color: var(--muted);
+  }
+
+  /* SLIDERS */
+  .sliders-section {
+    padding: 10px 16px 8px;
+  }
+  .slider-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+  .slider-row:last-child { margin-bottom: 0; }
+  .slider-lbl {
+    font-size: 9px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    width: 52px;
+    flex-shrink: 0;
+    font-weight: 500;
+  }
+  .slider-track {
+    flex: 1;
+    -webkit-appearance: none;
+    appearance: none;
+    height: 3px;
+    border-radius: 2px;
+    outline: none;
+    cursor: pointer;
+  }
+  .slider-track.shutter { background: linear-gradient(to right, rgba(232,184,75,0.3), var(--accent)); }
+  .slider-track.fstop { background: linear-gradient(to right, rgba(232,184,75,0.3), var(--accent)); }
+  .slider-track.iso { background: linear-gradient(to right, rgba(232,184,75,0.3), var(--accent)); }
+  .slider-track::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 18px; height: 18px;
+    border-radius: 50%;
+    background: var(--accent);
+    cursor: pointer;
+    box-shadow: 0 0 6px rgba(232,184,75,0.4);
+  }
+  .slider-val {
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--accent);
+    min-width: 52px;
+    text-align: right;
+  }
+
+  /* PERMISSION / ERROR STATE */
+  .permission-screen {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    padding: 32px;
+    text-align: center;
+  }
+  .perm-icon {
+    width: 60px; height: 60px;
+    border-radius: 50%;
+    border: 1.5px solid var(--accent);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 28px;
+  }
+  .perm-title {
+    font-size: 17px;
+    font-weight: 500;
+    color: var(--text);
+  }
+  .perm-sub {
+    font-size: 13px;
+    color: var(--muted);
+    line-height: 1.5;
+  }
+  .perm-btn {
+    background: var(--accent);
+    color: #000;
+    border: none;
+    border-radius: 24px;
+    padding: 12px 32px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    letter-spacing: 0.02em;
+  }
+
+  /* KELVIN COLOR TEMPERATURE BAR */
+  .kelvin-bar {
+    height: 3px;
+    border-radius: 2px;
+    background: linear-gradient(to right, #6baeff, #fff8e7, #ffb347, #ff6a00);
+    margin-top: 6px;
+    position: relative;
+    overflow: hidden;
+  }
+  .kelvin-indicator {
+    position: absolute;
+    top: -2px;
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: white;
+    box-shadow: 0 0 4px rgba(0,0,0,0.6);
+    transform: translateX(-50%);
+    transition: left 0.15s;
+  }
+
+  /* ZOOM SLIDER */
+  .zoom-section {
+    padding: 0 16px 6px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .zoom-lbl {
+    font-size: 9px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    width: 52px;
+    flex-shrink: 0;
+    font-weight: 500;
+  }
+  .zoom-track {
+    flex: 1;
+    -webkit-appearance: none;
+    appearance: none;
+    height: 3px;
+    border-radius: 2px;
+    background: linear-gradient(to right, rgba(75,200,232,0.3), var(--accent2));
+    outline: none;
+    cursor: pointer;
+  }
+  .zoom-track::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 18px; height: 18px;
+    border-radius: 50%;
+    background: var(--accent2);
+    cursor: pointer;
+    box-shadow: 0 0 6px rgba(75,200,232,0.4);
+  }
+  .zoom-val {
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--accent2);
+    min-width: 52px;
+    text-align: right;
+  }
+
+</style>
+</head>
+<body>
+
+<div class="safe-top" style="background: var(--panel); flex-shrink:0; height: env(safe-area-inset-top, 0px);"></div>
+
+<!-- HEADER -->
+<div class="header">
+  <div>
+    <div class="header-title">Color Meter</div>
+    <div class="header-sub" id="mode-label">Camera Inactive</div>
+  </div>
+  <div class="rec-dot" id="rec-dot"></div>
+</div>
+
+<!-- VIEWFINDER -->
+<div class="viewfinder-wrap" id="vf-wrap">
+  <video id="video" autoplay playsinline muted></video>
+  <canvas id="hidden-canvas" width="320" height="240"></canvas>
+
+  <div class="reticle" id="reticle">
+    <div class="reticle-ring">
+      <div class="reticle-corner rc-tl"></div>
+      <div class="reticle-corner rc-tr"></div>
+      <div class="reticle-corner rc-bl"></div>
+      <div class="reticle-corner rc-br"></div>
+    </div>
+  </div>
+
+  <div class="color-swatch" id="color-swatch"></div>
+  <div class="zoom-overlay" id="zoom-label">1.0×</div>
+  <div class="zoom-hint">Pinch to zoom · Tap to focus</div>
+
+  <!-- Permission overlay -->
+  <div class="permission-screen" id="perm-screen" style="position:absolute;inset:0;background:#0a0a0a;z-index:20;">
+    <div class="perm-icon">⬡</div>
+    <div class="perm-title">Camera Access Required</div>
+    <div class="perm-sub">Color Meter uses your camera to measure color temperature and tint values in real time.</div>
+    <button class="perm-btn" id="start-btn">Enable Camera</button>
+  </div>
+</div>
+
+<!-- METER PANEL -->
+<div class="meter-panel">
+
+  <!-- PRIMARY READINGS: K + TINT -->
+  <div class="primary-readings">
+    <div class="reading-block">
+      <div class="reading-label">Color Temp</div>
+      <div class="reading-value kelvin-value" id="kelvin-val">—<span class="reading-unit">K</span></div>
+      <div class="kelvin-bar"><div class="kelvin-indicator" id="k-indicator" style="left:50%"></div></div>
+    </div>
+    <div class="reading-block">
+      <div class="reading-label">Tint</div>
+      <div class="reading-value tint-value" id="tint-val">—<span class="reading-unit">GM</span></div>
+      <div class="tint-bar"><div class="tint-indicator" id="tint-indicator" style="left:50%"></div></div>
+    </div>
+  </div>
+
+  <!-- EXPOSURE READINGS -->
+  <div class="exposure-row">
+    <div class="exp-block">
+      <div class="exp-label">Shutter</div>
+      <div class="exp-value" id="shutter-display">180<span class="exp-unit">°</span></div>
+    </div>
+    <div class="exp-block">
+      <div class="exp-label">F-Stop</div>
+      <div class="exp-value" id="fstop-display">f/2.8</div>
+    </div>
+    <div class="exp-block">
+      <div class="exp-label">ISO</div>
+      <div class="exp-value" id="iso-display">800</div>
+    </div>
+  </div>
+
+  <!-- ZOOM SLIDER -->
+  <div class="zoom-section" style="padding-top:10px;">
+    <span class="zoom-lbl">Zoom</span>
+    <input type="range" class="zoom-track" id="zoom-slider" min="1" max="8" step="0.1" value="1">
+    <span class="zoom-val" id="zoom-val-display">1.0×</span>
+  </div>
+
+  <!-- SLIDERS -->
+  <div class="sliders-section">
+    <div class="slider-row">
+      <span class="slider-lbl">Shutter</span>
+      <input type="range" class="slider-track shutter" id="shutter-slider" min="0" max="14" step="1" value="5">
+      <span class="slider-val" id="shutter-val">180°</span>
+    </div>
+    <div class="slider-row">
+      <span class="slider-lbl">F-Stop</span>
+      <input type="range" class="slider-track fstop" id="fstop-slider" min="0" max="9" step="1" value="4">
+      <span class="slider-val" id="fstop-val">f/2.8</span>
+    </div>
+    <div class="slider-row">
+      <span class="slider-lbl">ISO</span>
+      <input type="range" class="slider-track iso" id="iso-slider" min="0" max="10" step="1" value="4">
+      <span class="slider-val" id="iso-val">800</span>
+    </div>
+  </div>
+
+  <div class="safe-bottom"></div>
+</div>
+
+<script>
+const SHUTTER_ANGLES = [11.25,22.5,45,90,120,144,180,216,270,288,360];
+const FSTOPS = [1,1.2,1.4,1.8,2,2.4,2.8,4,5.6,8];
+const ISOS = [100,160,200,320,400,640,800,1000,1250,1600,3200];
+
+let stream = null;
+let zoomLevel = 1;
+let maxZoom = 8;
+let animFrame = null;
+
+const video = document.getElementById('video');
+const canvas = document.getElementById('hidden-canvas');
+const ctx = canvas.getContext('2d', { willReadFrequently: true });
+const permScreen = document.getElementById('perm-screen');
+const recDot = document.getElementById('rec-dot');
+const modeLabel = document.getElementById('mode-label');
+const kelvinEl = document.getElementById('kelvin-val');
+const tintEl = document.getElementById('tint-val');
+const swatchEl = document.getElementById('color-swatch');
+const kIndicator = document.getElementById('k-indicator');
+const tintIndicator = document.getElementById('tint-indicator');
+const shutterDisplay = document.getElementById('shutter-display');
+const fstopDisplay = document.getElementById('fstop-display');
+const isoDisplay = document.getElementById('iso-display');
+const zoomLabel = document.getElementById('zoom-label');
+
+// Slider value displays
+const shutterSlider = document.getElementById('shutter-slider');
+const fstopSlider = document.getElementById('fstop-slider');
+const isoSlider = document.getElementById('iso-slider');
+const shutterVal = document.getElementById('shutter-val');
+const fstopVal = document.getElementById('fstop-val');
+const isoVal = document.getElementById('iso-val');
+const zoomSlider = document.getElementById('zoom-slider');
+const zoomValDisplay = document.getElementById('zoom-val-display');
+
+shutterSlider.addEventListener('input', () => {
+  const v = SHUTTER_ANGLES[+shutterSlider.value];
+  shutterVal.textContent = v + '°';
+  shutterDisplay.innerHTML = v + '<span class="exp-unit">°</span>';
+});
+
+fstopSlider.addEventListener('input', () => {
+  const v = FSTOPS[+fstopSlider.value];
+  fstopVal.textContent = 'f/' + v;
+  fstopDisplay.innerHTML = 'f/' + v;
+});
+
+isoSlider.addEventListener('input', () => {
+  const v = ISOS[+isoSlider.value];
+  isoVal.textContent = v;
+  isoDisplay.textContent = v;
+});
+
+// ZOOM via slider
+zoomSlider.addEventListener('input', () => {
+  zoomLevel = parseFloat(zoomSlider.value);
+  applyZoom();
+  zoomValDisplay.textContent = zoomLevel.toFixed(1) + '×';
+  zoomLabel.textContent = zoomLevel.toFixed(1) + '×';
+});
+
+async function applyZoom() {
+  if (!stream) return;
+  const track = stream.getVideoTracks()[0];
+  const caps = track.getCapabilities ? track.getCapabilities() : {};
+  if (caps.zoom) {
+    const clamped = Math.min(zoomLevel, caps.zoom.max);
+    try { await track.applyConstraints({ advanced: [{ zoom: clamped }] }); } catch(e) {}
+  } else {
+    // CSS fallback
+    video.style.transform = `scale(${zoomLevel})`;
+    video.style.transformOrigin = 'center center';
+  }
+}
+
+// PINCH ZOOM
+let lastDist = null;
+let pinchStartZoom = 1;
+
+document.getElementById('vf-wrap').addEventListener('touchstart', e => {
+  if (e.touches.length === 2) {
+    lastDist = Math.hypot(e.touches[1].clientX - e.touches[0].clientX, e.touches[1].clientY - e.touches[0].clientY);
+    pinchStartZoom = zoomLevel;
+  }
+}, { passive: true });
+
+document.getElementById('vf-wrap').addEventListener('touchmove', e => {
+  if (e.touches.length === 2 && lastDist !== null) {
+    const dist = Math.hypot(e.touches[1].clientX - e.touches[0].clientX, e.touches[1].clientY - e.touches[0].clientY);
+    const scale = dist / lastDist;
+    zoomLevel = Math.max(1, Math.min(maxZoom, pinchStartZoom * scale));
+    zoomSlider.value = zoomLevel;
+    zoomValDisplay.textContent = zoomLevel.toFixed(1) + '×';
+    zoomLabel.textContent = zoomLevel.toFixed(1) + '×';
+    applyZoom();
+  }
+}, { passive: true });
+
+document.getElementById('vf-wrap').addEventListener('touchend', () => { lastDist = null; });
+
+// START CAMERA
+document.getElementById('start-btn').addEventListener('click', startCamera);
+
+async function startCamera() {
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: 'environment',
+        width: { ideal: 1920 },
+        height: { ideal: 1080 }
+      },
+      audio: false
+    });
+    video.srcObject = stream;
+    await video.play();
+    permScreen.style.display = 'none';
+    recDot.classList.add('active');
+    modeLabel.textContent = 'Live Measurement';
+
+    // Check max zoom
+    const track = stream.getVideoTracks()[0];
+    if (track.getCapabilities) {
+      const caps = track.getCapabilities();
+      if (caps.zoom) {
+        maxZoom = Math.min(caps.zoom.max, 8);
+        zoomSlider.max = maxZoom;
+      }
+    }
+
+    startMeasuring();
+  } catch(e) {
+    modeLabel.textContent = 'Camera Error';
+    document.querySelector('.perm-sub').textContent = 'Could not access camera: ' + e.message + '. Make sure you\'re on HTTPS.';
+  }
+}
+
+// MEASUREMENT LOOP
+function startMeasuring() {
+  function measure() {
+    animFrame = requestAnimationFrame(measure);
+    if (video.readyState < 2) return;
+
+    const cw = canvas.width, ch = canvas.height;
+    ctx.drawImage(video, 0, 0, cw, ch);
+
+    // Sample center region (reticle area: ~20% of frame)
+    const sw = Math.floor(cw * 0.2), sh = Math.floor(ch * 0.2);
+    const sx = Math.floor((cw - sw) / 2), sy = Math.floor((ch - sh) / 2);
+    const data = ctx.getImageData(sx, sy, sw, sh).data;
+
+    let rSum = 0, gSum = 0, bSum = 0, count = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      rSum += data[i];
+      gSum += data[i+1];
+      bSum += data[i+2];
+      count++;
+    }
+    const r = rSum / count, g = gSum / count, b = bSum / count;
+
+    swatchEl.style.background = `rgb(${Math.round(r)},${Math.round(g)},${Math.round(b)})`;
+
+    const kelvin = rgbToKelvin(r, g, b);
+    const tint = rgbToTint(r, g, b);
+
+    // Display Kelvin
+    const kRounded = Math.round(kelvin / 50) * 50;
+    kelvinEl.innerHTML = kRounded + '<span class="reading-unit">K</span>';
+
+    // Kelvin bar indicator (1000K=0% to 10000K=100%)
+    const kPct = Math.max(0, Math.min(100, (kRounded - 1000) / 9000 * 100));
+    kIndicator.style.left = kPct + '%';
+
+    // Display Tint
+    const tRounded = Math.round(tint);
+    const tSign = tRounded >= 0 ? '+' : '';
+    tintEl.innerHTML = tSign + tRounded + '<span class="reading-unit">GM</span>';
+
+    // Tint bar indicator (-150 to +150)
+    const tPct = Math.max(0, Math.min(100, (tint + 150) / 300 * 100));
+    tintIndicator.style.left = tPct + '%';
+  }
+  measure();
+}
+
+// RGB → Color Temperature (Kelvin)
+// Using a chromaticity-based approximation
+function rgbToKelvin(r, g, b) {
+  // Linear RGB
+  const rl = r / 255, gl = g / 255, bl = b / 255;
+
+  // CIE XYZ
+  const X = rl * 0.4124564 + gl * 0.3575761 + bl * 0.1804375;
+  const Y = rl * 0.2126729 + gl * 0.7151522 + bl * 0.0721750;
+  const Z = rl * 0.0193339 + gl * 0.1191920 + bl * 0.9503041;
+
+  const denom = X + Y + Z;
+  if (denom < 0.001) return 5600;
+
+  const cx = X / denom;
+  const cy = Y / denom;
+
+  // McCamy's formula
+  const n = (cx - 0.3320) / (0.1858 - cy);
+  const CCT = 449 * n * n * n + 3525 * n * n + 6823.3 * n + 5520.33;
+
+  return Math.max(1000, Math.min(20000, CCT));
+}
+
+// RGB → Tint (Green-Magenta shift, in Mireds-like units)
+function rgbToTint(r, g, b) {
+  const rl = r / 255, gl = g / 255, bl = b / 255;
+  const X = rl * 0.4124564 + gl * 0.3575761 + bl * 0.1804375;
+  const Y = rl * 0.2126729 + gl * 0.7151522 + bl * 0.0721750;
+  const Z = rl * 0.0193339 + gl * 0.1191920 + bl * 0.9503041;
+
+  const denom = X + Y + Z;
+  if (denom < 0.001) return 0;
+
+  const cy = Y / denom;
+  // Tint approximation: deviation from blackbody locus in y chromaticity
+  // Positive = green, negative = magenta
+  const blackbodyCy = 0.317; // rough reference
+  const tint = (cy - blackbodyCy) * 1000;
+  return Math.max(-150, Math.min(150, tint));
+}
+</script>
+</body>
+</html>
